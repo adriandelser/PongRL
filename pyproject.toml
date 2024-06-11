@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "pong"
+version = "0.1.0"
+description = ""
+authors = ["Adrian del Ser <adrian.delser@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+mlx = "^0.14.1"
+pygame = "^2.5.2"
+numpy = "^1.26.4"
+matplotlib = "^3.9.0"
+numba = "^0.59.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
