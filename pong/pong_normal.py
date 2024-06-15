@@ -8,8 +8,6 @@ import mlx
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Initialize Pygame
-pygame.init()
 
 # Constants
 # WIDTH, HEIGHT = 800, 600
@@ -26,15 +24,13 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 ENTROPY_BETA = 0.01  # Entropy regularization factor
 GAMMA = 0.99  # Discount factor for future rewards
-REPLAY_BUFFER_SIZE = 10000
-BATCH_SIZE = 128
-UPDATE_FREQUENCY = 500
-ACCUMULATION_STEP = 500
-MINI_BATCHES_PER_ACCUMULATION = 4
-MAX_GRADIENT = 1
+UPDATE_FREQUENCY = 20
+MAX_GAME_LEN = 1000
 
 
 
+# Initialize Pygame
+pygame.init()
 # Set up the display
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption('Pong')
@@ -49,9 +45,8 @@ def draw(screen, paddle_y, ball_x, ball_y):
     pygame.draw.circle(screen, WHITE, (ball_x, ball_y), BALL_RADIUS)
     pygame.display.flip()
 
-@jit(nopython=True)
 def step_game(paddle_y, ball_x, ball_y, ball_speed_x, ball_speed_y, decision):
-    reward = -0.01  # Small negative reward for each frame
+    reward = 0  # Small negative reward for each frame or zero since it doesn't really matter here
     if decision and paddle_y < HEIGHT - PADDLE_HEIGHT:  # pygame.K_UP
         paddle_y += PADDLE_SPEED
     if not decision and paddle_y > 0:  # pygame.K_DOWN
@@ -89,8 +84,15 @@ def step_game(paddle_y, ball_x, ball_y, ball_speed_x, ball_speed_y, decision):
 
     return paddle_y, ball_x, ball_y, ball_speed_x, ball_speed_y, reward
 
-def loss_fn(model, all_xin, all_actions, all_rewards, entropy_beta = ENTROPY_BETA, l2_lambda = 1e-4):
+def loss_fn(model, all_xin, all_actions, all_logprobs, all_rewards, entropy_beta = ENTROPY_BETA, l2_lambda = 1e-4):
     '''shapes: (B, W*H), (B,), (B,)'''
+    for idx, rewards in enumerate(all_rewards):
+        x_in = all_xin[idx]
+        actions = all_actions[idx]
+        logprobs = all_logprobs[idx]
+        rewards = (rewards-mx.mean(rewards))/(mx.std(rewards)+1e-8) #(B,)
+        loss = -mx.tensordot(logprobs, rewards)
+
 
     # Normalize the input frames and rewards
     # all_xin = (all_xin - mx.mean(all_xin)) / (mx.std(all_xin)+1e-8)
@@ -115,6 +117,15 @@ def loss_fn(model, all_xin, all_actions, all_rewards, entropy_beta = ENTROPY_BET
     l2_loss = mx.sum(mx.array([mx.sum(param['weight'] ** 2).item() for param in model.parameters().values()])) * l2_lambda
     print(f"{weighted_loss=}, {entropy_loss=}, {l2_loss=}")
     return weighted_loss + entropy_loss + l2_loss
+
+def loss_fn_reinforce(logprobs, rewards):
+    # print(logprobs, rewards)
+    # print(logprobs.shape, rewards.shape)
+    loss = -logprobs@rewards
+    return loss
+
+
+
 
 def compute_discounted_rewards(rewards, gamma:float = GAMMA):
     #ensure rewards array is of float dtype
@@ -145,10 +156,10 @@ def compute_discounted_rewards(rewards, gamma:float = GAMMA):
 if __name__ == '__main__':
     lr = 3e-4
     model = PongRL(WIDTH, HEIGHT)
-    model.load_weights('weights.safetensors')
+    model.load_weights('weights_100001.safetensors')
     model.eval()
     # Create the gradient function
-    loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
+    loss_and_grad_fn = nn.value_and_grad(model, loss_fn_reinforce)
     # # create a mlx optimizer
     optimizer = mlx.optimizers.AdamW(learning_rate = lr)
     # replay_buffer = ReplayBuffer(REPLAY_BUFFER_SIZE)
@@ -166,10 +177,14 @@ if __name__ == '__main__':
     # num_games = 0
     
     running = True
-    all_diff = mx.zeros((1, WIDTH * HEIGHT))
-    all_actions = mx.zeros((1,), dtype=mx.int32)
-    all_rewards = mx.zeros((1,))
+    all_diff = []
+    all_actions = []
+    all_rewards = []
+    all_logprobs = []
+    # current_game_diff = mx.zeros((1, WIDTH * HEIGHT))
+    # current_game_actions = mx.zeros((1,), dtype=mx.int32)
     current_game_rewards = mx.zeros((1,), dtype=mx.float32)
+    current_game_logprobs = mx.zeros((1,), dtype=mx.float32)
     paddle_y = HEIGHT // 2
     ball_x, ball_y = WIDTH // 2, HEIGHT // 2
     ball_speed_x, ball_speed_y = BALL_SPEED_X, BALL_SPEED_Y
@@ -177,9 +192,8 @@ if __name__ == '__main__':
     game_len = 0
     num_games = 0
     update_counter = 0
+    done = False
 
-    # Initialize gradient accumulator
-    accumulated_grads = None
 
     while running:
         game_len+=1
@@ -192,9 +206,9 @@ if __name__ == '__main__':
 
         model.eval()
         logits = model(diff)
-        decision = model.decide(logits) # up if true, down if false
+        decision, logprob = model.decide(logits) # up if true, down if false
         # print(decision)
-        all_actions = mx.concatenate((all_actions, mx.array([int(decision)])))
+        # current_game_actions = mx.concatenate((current_game_actions, mx.array([int(decision)])))
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -203,77 +217,54 @@ if __name__ == '__main__':
         paddle_y, ball_x, ball_y, ball_speed_x, ball_speed_y, reward = step_game(
             paddle_y, ball_x, ball_y, ball_speed_x, ball_speed_y, decision
         )
-        all_diff = mx.concatenate((all_diff, diff))
-        all_actions = mx.concatenate((all_actions, mx.array([int(decision)])))
+        # current_game_diff = mx.concatenate((current_game_diff, diff))
+        # current_game_actions = mx.concatenate((current_game_actions, mx.array([int(decision)])))
         current_game_rewards = mx.concatenate((current_game_rewards, mx.array([reward])))
+        current_game_logprobs = mx.concatenate((current_game_logprobs, logprob))
         # current_game_rewards = mx.concatenate((current_game_rewards, mx.array([reward])))
-        if reward == -1:
+        if reward == -1 or game_len>=MAX_GAME_LEN:
             # game over
             num_games+=1
+            game_len=0
             print(num_games)
-            # game_len=0
-
-            current_game_rewards = compute_discounted_rewards(current_game_rewards[1:])
-            # print(current_game_rewards.shape)
-            all_rewards = mx.concatenate((all_rewards, current_game_rewards[1:]))
+            discounted_rewards = compute_discounted_rewards(current_game_rewards[1:])
+            all_rewards.append(discounted_rewards)
+            # all_actions.append(current_game_actions[1:])
+            # all_diff.append(current_game_diff[1:])
+            all_logprobs.append(current_game_logprobs[1:])
             current_game_rewards = mx.zeros((1,), dtype=mx.float32)
-   
-        
-        # if game_len % ACCUMULATION_STEP == 0 and len(all_rewards)>BATCH_SIZE: #Accumulate gradients every so many frames
-        #     print('Accumulating Gradients')
-        #     # update_counter+=1
-        #     model.train()
-        #     for _ in range(MINI_BATCHES_PER_ACCUMULATION):
-        #         start_index = np.random.randint(0,len(all_rewards)-BATCH_SIZE)
-        #         # sample_indices = np.random.choice(len(all_rewards), (BATCH_SIZE,), replace=False)
-        #         sample_indices = mx.arange(start=start_index, stop=start_index+BATCH_SIZE, step=1)
-        #         # print(sample_indices)
-        #         # print(all_diff[sample_indices], all_actions[sample_indices], all_rewards[sample_indices])
-        #         loss, grads = loss_and_grad_fn(model, all_diff[sample_indices], all_actions[sample_indices], all_rewards[sample_indices])
-        #         print(f"{grads=}")
-        #         # import sys
-        #         # sys.exit()
-        #         # Accumulate gradients
-        #         if accumulated_grads is None:
-        #             accumulated_grads = grads
-        #             for key in accumulated_grads.keys():
-        #                 print(f"{accumulated_grads[key]['weight']=}")
-        #                 accumulated_grads[key]['weight'] += grads[key]['weight']
-        #                 accumulated_grads[key]['weight'] = mx.clip(accumulated_grads[key]['weight'], -MAX_GRADIENT,MAX_GRADIENT)
+            # current_game_actions = mx.zeros((1,), dtype=mx.int32)
+            # current_game_diff = mx.zeros((1, WIDTH * HEIGHT))
+            current_game_logprobs = mx.zeros((1,), dtype=mx.float32)
 
 
-        if game_len%UPDATE_FREQUENCY == 0 and len(all_rewards)>BATCH_SIZE and False:
+
+
+        if num_games%UPDATE_FREQUENCY == 0 and (reward == -1 or game_len>=MAX_GAME_LEN) and False: #reward -1 just checks that the game is over
             print("Updating model weights")
             # Update the model with the gradients. So far no computation has happened.
-            # NOTE I assume this does zero grad? Haven't seen any explicit zero gradding in the mlx docs. Need to make sure...
-            # print(accumulated_grads)
+            print(mx.mean(mx.array([rewards.mean() for rewards in all_rewards])))
             model.train()
-            # sample_indices = np.random.choice(len(all_rewards), (BATCH_SIZE,), replace=False)
-            # sample_indices = mx.array(sample_indices)
-            # sample_indices = mx.array(np.arange(BATCH_SIZE))
-            start_index = np.random.randint(0,len(all_rewards)-BATCH_SIZE)
-            sample_indices = mx.arange(start=start_index, stop=start_index+BATCH_SIZE, step=1)
-            loss, grads = loss_and_grad_fn(model, all_diff[1:][sample_indices], all_actions[1:][sample_indices], all_rewards[1:][sample_indices])
-            print(f"{grads=}")
-            # optimizer.update(model, accumulated_grads) 
+            for idx, rewards in enumerate(all_rewards):
+                # states = all_diff[idx]
+                # actions = all_actions[idx]
+                # print(idx, rewards)
+                logprobs = all_logprobs[idx]
+                rewards = (rewards-mx.mean(rewards))/(mx.std(rewards)+1e-8) #(B,)
+                loss, grads = loss_and_grad_fn(logprobs, rewards)
+                optimizer.update(model, grads) 
+                mx.eval(model.parameters(), optimizer.state)
             
-            # accumulated_grads/=update_counter
-            optimizer.update(model, grads) 
-
-            # Compute the new parameters but also the optimizer state.
-            mx.eval(model.parameters(), optimizer.state)
-            # print(model.parameters())
-
-            # Reset the gradient accumulator and data arrays
-            accumulated_grads = None
-            all_diff = mx.zeros((1, WIDTH*HEIGHT)) #num game, nume
-            all_actions = mx.zeros((1,), dtype=mx.int32)
-            all_rewards = mx.zeros((1,))
+            # reset data arrays
+            # all_diff = mx.zeros((1, WIDTH*HEIGHT)) #num game, nume
+            # all_actions = mx.zeros((1,), dtype=mx.int32)
+            all_rewards = []
+            all_logprobs = []
 
 
 
         draw(screen, paddle_y, ball_x, ball_y)
-        clock.tick(1000000)
+        clock.tick(100)
     print('saving weights')
-    model.save_weights('weights.safetensors')
+    # model.save_weights('weights.safetensors')
     pygame.quit()

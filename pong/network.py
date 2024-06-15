@@ -19,7 +19,12 @@ class PongRL(nn.Module):
     
     def decide(self, logits: mx.array)->bool:
         out = mx.random.categorical(logits)
-        return bool(out)
+        probs = mx.softmax(logits)
+        # print(probs, out, probs[out])
+        logprob = probs[0,out].log()
+        # print(logprob)
+        print(bool(out),probs[0,out])
+        return bool(out), logprob
     
 if __name__ == '__main__':
     model = PongRL(width=210, height = 160)

@@ -2,7 +2,7 @@ import mlx.core as mx
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-w = mx.load('../weights.safetensors')
+w = mx.load('weights_100001.safetensors')
 
 
 w1 = w['fc1.weight']
@@ -11,7 +11,7 @@ w1 = mx.reshape(w1,(-1,80,80))
 
 fig, ax = plt.subplots(10,20)
 for i, w in enumerate(w1):
-    print(w)
+    # print(w)
     # print(i, i//10, i%10)
     axs = ax[i//20,i%20]
     axs.imshow(w)
