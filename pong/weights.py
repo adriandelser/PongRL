@@ -2,10 +2,10 @@ import mlx.core as mx
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-w = mx.load('weights_100001.safetensors')
+w = mx.load('weights.safetensors')
 
-
-w1 = w['fc1.weight']
+print(w.keys())
+w1 = w['layers.0.weight']
 print(w1.shape)
 w1 = mx.reshape(w1,(-1,80,80))
 

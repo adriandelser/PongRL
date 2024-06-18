@@ -12,6 +12,8 @@ pygame = "^2.5.2"
 numpy = "^1.26.4"
 matplotlib = "^3.9.0"
 numba = "^0.59.1"
+gymnasium = {extras = ["accept-rom-license", "atari"], version = "^0.29.1"}
+
 
 
 [build-system]

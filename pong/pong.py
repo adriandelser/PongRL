@@ -1,5 +1,5 @@
 import pygame
-from network import PongRL
+from pong.policy import Policy
 # Initialize Pygame
 pygame.init()
 
