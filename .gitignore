@@ -1,4 +1,6 @@
-./old_weights/*
+old/*
+results/best*
+results/weights*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -9,7 +11,7 @@ __pycache__/
 *.so
 
 # Distribution / packaging
-.Python
+.Pythong
 build/
 develop-eggs/
 dist/

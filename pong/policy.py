@@ -44,7 +44,7 @@ class REINFORCE:
 
     def get_action(self, obs):
         logits = self.policy(obs)
-        action = mx.random.categorical(logits)
+        action = mx.random.categorical(logits) + 2 #+2 because pong is 2 for up, 3 for down
         return action.item()
 
     def loss_fn(self, observations, actions, rewards):
@@ -54,7 +54,8 @@ class REINFORCE:
 
     def get_log_probs(self, observations, actions):
         logits = self.policy(observations)
-        probs = nn.softmax(logits)[mx.arange(actions.shape[0]), actions]
+        #remember actions are either 2 or 3, so we need to do -2 for indexing
+        probs = nn.softmax(logits)[mx.arange(actions.shape[0]), actions-2]
         log_probs = mx.log(probs)
         return log_probs
 
@@ -76,17 +77,45 @@ def compute_discounted_rewards(rewards, gamma:float = 0.99):
 class RolloutBuffer:
     def __init__(self):
         self.buffer = {}
+        # self.i = 0
 
     def add(self, **kwargs):
         for key, value in kwargs.items():
             if key not in self.buffer:
-                self.buffer[key] = []
-            self.buffer[key].append(mx.array(value))
+                if key == 'reward':
+                    self.buffer[key] = [[]]
+                # elif key == 'obs':
+                #     self.buffer[key] = mx.zeros((20_000, len(value)))
+                #     # print(self.buffer[key].shape)
+                else:
+                    self.buffer[key] = []
+
+            if key == 'reward':
+                self.buffer[key][-1].append(value) #append to last list
+                if value in {-1,1}:
+                    self.buffer[key].append([]) # start new list
+            # elif key == 'obs':
+            #     # print(value.shape,self.buffer[key].shape, mx.array(value)[None].shape)
+            #     # self.buffer[key] = mx.concatenate((self.buffer[key], mx.array(value)[None]), axis=0) 
+            #     self.buffer[key][self.i] = mx.array(value)
+            #     self.i+=1
+                # print(self.buffer[key].shape)
+            else:
+                self.buffer[key].append(value)
 
     def clear(self):
         self.buffer = {}
+        self.i=0
 
     def get(self, key):
+        if key == 'reward':
+            rewards = self.buffer.get(key, None)
+            if len(rewards[-1]) == 0:
+                return rewards[:-1] # remove the empty list
+            return rewards
+        # if key == 'obs':
+        #     print(self.buffer.get(key, None)[:self.i].shape)
+        #     return self.buffer.get(key, None)[:self.i] #remove the original zeros array
         return mx.array(self.buffer.get(key, None))
 
     def __getitem__(self, key):
